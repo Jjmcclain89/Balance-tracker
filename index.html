@@ -66,10 +66,30 @@
   .actions { display: flex; gap: 10px; margin-top: 16px; } .actions button { flex: 1; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
   [hidden] { display: none !important; }
+  .auth { max-width: 380px; margin: 12vh auto 0; }
+  .err { color: var(--neg); font-size: 14px; margin-top: 10px; min-height: 1em; }
+  .loading { opacity: .5; pointer-events: none; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 </head>
 <body>
-<main>
+<main id="authView" hidden>
+  <form class="card auth" id="authForm">
+    <h3 style="margin:0 0 4px">Balance Tracker</h3>
+    <div class="hint">Sign in to continue.</div>
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="email" required>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" minlength="6" required>
+    <div class="err" id="authErr"></div>
+    <div class="actions">
+      <button type="button" id="signUpBtn">Create account</button>
+      <button type="submit" class="primary">Sign in</button>
+    </div>
+  </form>
+</main>
+
+<main id="appView" hidden>
   <header>
     <h1>Balance Tracker</h1>
     <button class="link" id="settingsBtn">Settings</button>
@@ -140,7 +160,7 @@
     <div class="preview" id="preview"></div>
     <div class="actions">
       <button type="button" id="cancelBtn">Cancel</button>
-      <button type="submit" class="primary">Save</button>
+      <button type="submit" class="primary" id="saveTx">Save</button>
     </div>
   </form>
 </dialog>
@@ -159,8 +179,11 @@
       <div><button type="button" id="importBtn" style="width:100%">Import JSON</button></div>
     </div>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
-    <div class="hint">Data is stored in this browser only. Export regularly to keep a backup.</div>
-    <div class="actions"><button type="submit" class="primary" id="saveSettings">Done</button></div>
+    <div class="hint">Data is synced to Supabase. Import adds the file's transactions to your existing ones.</div>
+    <div class="actions">
+      <button type="button" id="signOutBtn">Sign out</button>
+      <button type="submit" class="primary" id="saveSettings">Done</button>
+    </div>
   </form>
 </dialog>
 
@@ -168,28 +191,26 @@
 <datalist id="identities"></datalist>
 
 <script>
-const KEY = 'balance-tracker-v1';
+const SUPABASE_URL = 'https://deypqofvamltxkzwnoci.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_5Kv9_RQBbqUeOJo54ayavw_dtwaLAGy';
+const LEGACY_KEY = 'balance-tracker-v1';
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = (id) => document.getElementById(id);
 
 // Balance convention: positive = I owe them, negative = they owe me.
-let state = load();
-
-function load() {
-  try {
-    const s = JSON.parse(localStorage.getItem(KEY));
-    if (s && Array.isArray(s.transactions)) return { settings: {}, ...s };
-  } catch {}
-  return { settings: { name: '', defaultPct: '' }, transactions: [] };
-}
-function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
+let state = { settings: { name: '', default_pct: null }, transactions: [] };
+let user = null;
 
 const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : NaN; };
 const round2 = (n) => Math.round(n * 100) / 100;
 const fmt = (n) => (n < 0 ? '−' : '') + '$' + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtSigned = (n) => (n > 0 ? '+' : '') + fmt(n);
 const who = () => state.settings.name || 'them';
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const theyOwe = () => state.settings.name ? `${state.settings.name} owes me` : 'They owe me';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+const busy = (el, on) => el.classList.toggle('loading', on);
 
 // Compute a transaction's effect on the balance from the form inputs.
 function compute(t) {
@@ -206,8 +227,64 @@ function compute(t) {
   return { delta: round2(t.amount * t.dir) };
 }
 
-function balance() { return round2(state.transactions.reduce((s, t) => s + t.delta, 0)); }
+function balance() { return round2(state.transactions.reduce((s, t) => s + Number(t.delta), 0)); }
 
+// ----- Data -----
+async function loadData() {
+  busy($('appView'), true);
+  const [tx, st] = await Promise.all([
+    db.from('transactions').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }),
+    db.from('settings').select('name, default_pct').maybeSingle(),
+  ]);
+  busy($('appView'), false);
+  if (tx.error) return alert('Could not load transactions: ' + tx.error.message);
+  state.transactions = tx.data;
+  if (st.data) state.settings = st.data;
+  render();
+  offerLegacyImport();
+}
+
+async function insertTransactions(rows) {
+  const { data, error } = await db.from('transactions').insert(rows).select();
+  if (error) throw error;
+  return data;
+}
+
+// Old versions kept everything in localStorage; offer to upload it once.
+async function offerLegacyImport() {
+  let legacy;
+  try { legacy = JSON.parse(localStorage.getItem(LEGACY_KEY)); } catch { return; }
+  if (!legacy?.transactions?.length) return;
+  if (!confirm(`Found ${legacy.transactions.length} transactions saved in this browser from before. Upload them to your account?`)) return;
+  await importData(legacy);
+  try { localStorage.removeItem(LEGACY_KEY); } catch {}
+}
+
+// Accepts both exports from this version and the old localStorage format.
+async function importData(data) {
+  const cols = ['type', 'date', 'casino', 'identity', 'amount', 'pct', 'cut', 'side', 'game', 'result', 'share', 'description', 'dir', 'delta'];
+  const rows = data.transactions.map((t) => {
+    const r = { ...t, description: t.description ?? t.desc };
+    return Object.fromEntries(cols.filter((c) => r[c] !== undefined && r[c] !== '').map((c) => [c, r[c]]));
+  });
+  try {
+    await insertTransactions(rows);
+    const s = data.settings || {};
+    const pct = s.default_pct ?? s.defaultPct;
+    if (s.name || (pct !== '' && pct != null)) {
+      await saveSettings({ name: s.name || state.settings.name, default_pct: pct === '' ? null : pct ?? state.settings.default_pct });
+    }
+    await loadData();
+  } catch (err) { alert('Import failed: ' + err.message); }
+}
+
+async function saveSettings(s) {
+  const { error } = await db.from('settings').upsert({ user_id: user.id, ...s, updated_at: new Date().toISOString() });
+  if (error) throw error;
+  state.settings = s;
+}
+
+// ----- Rendering -----
 function render() {
   const b = balance();
   $('balAmount').textContent = fmt(Math.abs(b));
@@ -215,31 +292,30 @@ function render() {
   $('balLabel').textContent = b > 0 ? `I owe ${who()}` : b < 0 ? theyOwe() : 'All square';
   $('balSub').textContent = `${state.transactions.length} transaction${state.transactions.length === 1 ? '' : 's'}`;
 
-  const list = [...state.transactions].sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.createdAt - a.createdAt);
+  const list = state.transactions;
   $('txList').innerHTML = list.length ? list.map(row).join('') : '<div class="empty">No transactions yet</div>';
 
   const uniq = (k) => [...new Set(state.transactions.map((t) => t[k]).filter(Boolean))];
   $('casinos').innerHTML = uniq('casino').map((c) => `<option value="${esc(c)}">`).join('');
   $('identities').innerHTML = uniq('identity').map((c) => `<option value="${esc(c)}">`).join('');
 }
-const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-const theyOwe = () => state.settings.name ? `${state.settings.name} owes me` : 'They owe me';
 
 function row(t) {
   let title, meta;
+  const delta = Number(t.delta);
   if (t.type === 'pickup') {
     title = `Pickup · ${esc(t.casino)}`;
-    meta = `<span class="chip">${esc(t.identity)}</span>${fmt(t.amount)} @ ${t.pct}% · my cut ${fmt(t.cut)}`;
+    meta = `<span class="chip">${esc(t.identity)}</span>${fmt(Number(t.amount))} @ ${Number(t.pct)}% · my cut ${fmt(Number(t.cut))}`;
   } else if (t.type === 'action') {
     title = `Action ${t.side} · ${esc([t.casino, t.game].filter(Boolean).join(' – ') || 'no details')}`;
-    meta = `Result ${fmtSigned(t.result)} @ ${t.pct}%`;
+    meta = `Result ${fmtSigned(Number(t.result))} @ ${Number(t.pct)}%`;
   } else {
-    title = esc(t.desc);
+    title = esc(t.description);
     meta = t.dir > 0 ? `I owe ${esc(who())}` : esc(theyOwe());
   }
   return `<div class="tx">
     <div><div class="title">${title}</div><div class="meta">${t.date} · ${meta}</div></div>
-    <div class="right"><div class="${t.delta > 0 ? 'neg' : t.delta < 0 ? 'pos' : ''}">${fmtSigned(t.delta)}</div>
+    <div class="right"><div class="${delta > 0 ? 'neg' : delta < 0 ? 'pos' : ''}">${fmtSigned(delta)}</div>
     <button class="del" data-del="${t.id}">Delete</button></div>
   </div>`;
 }
@@ -267,9 +343,9 @@ function readForm() {
     return { type, date, casino: $('pCasino').value.trim(), identity: $('pIdentity').value.trim(), amount: num($('pAmount').value), pct: num($('pPct').value) };
   }
   if (type === 'action') {
-    return { type, date, side, casino: $('aCasino').value.trim(), game: $('aGame').value.trim(), result: num($('aResult').value), pct: num($('aPct').value) };
+    return { type, date, side, casino: $('aCasino').value.trim() || null, game: $('aGame').value.trim() || null, result: num($('aResult').value), pct: num($('aPct').value) };
   }
-  return { type, date, desc: $('gDesc').value.trim(), amount: num($('gAmount').value), dir };
+  return { type, date, description: $('gDesc').value.trim(), amount: num($('gAmount').value), dir };
 }
 
 function validate(t) {
@@ -282,7 +358,7 @@ function validate(t) {
     if (!Number.isFinite(t.result)) return 'Enter a result';
     if (!(t.pct >= 0 && t.pct <= 100)) return 'Enter my % (0–100)';
   } else {
-    if (!t.desc) return 'Enter a description';
+    if (!t.description) return 'Enter a description';
     if (!(t.amount > 0)) return 'Enter an amount';
   }
   return null;
@@ -305,38 +381,53 @@ $('txForm').addEventListener('input', updatePreview);
 $('addBtn').addEventListener('click', () => {
   $('txForm').reset();
   $('tDate').value = today();
-  if (state.settings.defaultPct !== '' && state.settings.defaultPct != null) {
-    $('pPct').value = $('aPct').value = state.settings.defaultPct;
+  if (state.settings.default_pct != null) {
+    $('pPct').value = $('aPct').value = Number(state.settings.default_pct);
   }
   updatePreview();
   $('txDlg').showModal();
 });
 $('cancelBtn').addEventListener('click', () => $('txDlg').close());
 
-$('txForm').addEventListener('submit', (e) => {
+$('txForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
   const t = readForm(), err = validate(t);
-  if (err) { e.preventDefault(); $('preview').textContent = err; return; }
-  state.transactions.push({ ...t, ...compute(t), id: crypto.randomUUID?.() || String(Date.now() + Math.random()), createdAt: Date.now() });
-  save(); render();
+  if (err) { $('preview').textContent = err; return; }
+  busy($('txForm'), true);
+  try {
+    const [saved] = await insertTransactions([{ ...t, ...compute(t) }]);
+    state.transactions.push(saved);
+    state.transactions.sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at));
+    render();
+    $('txDlg').close();
+  } catch (err) {
+    $('preview').textContent = 'Save failed: ' + err.message;
+  } finally {
+    busy($('txForm'), false);
+  }
 });
 
-$('txList').addEventListener('click', (e) => {
+$('txList').addEventListener('click', async (e) => {
   const id = e.target.dataset?.del; if (!id) return;
   if (!confirm('Delete this transaction?')) return;
+  const { error } = await db.from('transactions').delete().eq('id', id);
+  if (error) return alert('Delete failed: ' + error.message);
   state.transactions = state.transactions.filter((t) => t.id !== id);
-  save(); render();
+  render();
 });
 
 // ----- Settings -----
 $('settingsBtn').addEventListener('click', () => {
   $('sName').value = state.settings.name || '';
-  $('sPct').value = state.settings.defaultPct ?? '';
+  $('sPct').value = state.settings.default_pct ?? '';
   $('setDlg').showModal();
 });
-$('saveSettings').addEventListener('click', () => {
-  state.settings.name = $('sName').value.trim();
-  state.settings.defaultPct = $('sPct').value;
-  save(); render();
+$('saveSettings').addEventListener('click', async () => {
+  const pct = $('sPct').value;
+  try {
+    await saveSettings({ name: $('sName').value.trim(), default_pct: pct === '' ? null : num(pct) });
+    render();
+  } catch (err) { alert('Could not save settings: ' + err.message); }
 });
 $('exportBtn').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
@@ -348,17 +439,47 @@ $('exportBtn').addEventListener('click', () => {
 $('importBtn').addEventListener('click', () => $('importFile').click());
 $('importFile').addEventListener('change', async (e) => {
   const file = e.target.files[0]; if (!file) return;
+  e.target.value = '';
   try {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data.transactions)) throw new Error('No transactions found');
-    if (!confirm(`Replace current data with ${data.transactions.length} imported transactions?`)) return;
-    state = { settings: {}, ...data };
-    save(); render(); $('setDlg').close();
+    if (!confirm(`Add ${data.transactions.length} transactions from this file?`)) return;
+    $('setDlg').close();
+    await importData(data);
   } catch (err) { alert('Import failed: ' + err.message); }
-  e.target.value = '';
+});
+$('signOutBtn').addEventListener('click', async () => {
+  $('setDlg').close();
+  await db.auth.signOut();
 });
 
-render();
+// ----- Auth -----
+async function auth(kind) {
+  const email = $('email').value.trim(), password = $('password').value;
+  if (!email || password.length < 6) { $('authErr').textContent = 'Enter your email and a password (6+ characters)'; return; }
+  $('authErr').textContent = '';
+  busy($('authForm'), true);
+  const { data, error } = kind === 'signup'
+    ? await db.auth.signUp({ email, password, options: { emailRedirectTo: location.href.split('#')[0] } })
+    : await db.auth.signInWithPassword({ email, password });
+  busy($('authForm'), false);
+  if (error) { $('authErr').textContent = error.message; return; }
+  if (kind === 'signup' && !data.session) $('authErr').textContent = 'Check your email to confirm your account, then sign in.';
+}
+$('authForm').addEventListener('submit', (e) => { e.preventDefault(); auth('signin'); });
+$('signUpBtn').addEventListener('click', () => auth('signup'));
+
+db.auth.onAuthStateChange((_event, session) => {
+  const next = session?.user ?? null;
+  const changed = next?.id !== user?.id;
+  user = next;
+  $('authView').hidden = !!user;
+  $('appView').hidden = !user;
+  if (!changed) return;
+  state = { settings: { name: '', default_pct: null }, transactions: [] };
+  // Defer so Supabase calls don't run inside the auth callback.
+  if (user) setTimeout(loadData, 0);
+});
 </script>
 </body>
 </html>
