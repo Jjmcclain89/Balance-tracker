@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111418">
+<title>Balance Tracker</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #fff; --text: #15181d; --muted: #6b7280; --border: #e3e5e9;
+    --accent: #2563eb; --pos: #15803d; --neg: #b91c1c; --chip: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --card: #1a1e24; --text: #e8eaed; --muted: #9aa1ab; --border: #2a2f37;
+      --accent: #4f8cff; --pos: #4ade80; --neg: #f87171; --chip: #232830;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 560px; margin: 0 auto; padding: 16px 16px 48px; }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  header h1 { font-size: 18px; margin: 0; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+  .balance { text-align: center; padding: 28px 16px; }
+  .balance .label { color: var(--muted); font-size: 14px; }
+  .balance .amount { font-size: 44px; font-weight: 700; margin: 6px 0; font-variant-numeric: tabular-nums; }
+  .pos { color: var(--pos); } .neg { color: var(--neg); }
+  button {
+    font: inherit; border: 1px solid var(--border); background: var(--card); color: var(--text);
+    border-radius: 10px; padding: 10px 14px; cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.big { width: 100%; padding: 14px; margin-top: 12px; font-size: 17px; }
+  button.link { border: none; background: none; color: var(--muted); padding: 6px; }
+  h2 { font-size: 15px; color: var(--muted); font-weight: 600; margin: 24px 4px 8px; }
+  .tx { display: flex; gap: 12px; justify-content: space-between; padding: 12px 0; border-top: 1px solid var(--border); }
+  .tx:first-child { border-top: none; }
+  .tx .title { font-weight: 600; }
+  .tx .meta { color: var(--muted); font-size: 13px; }
+  .tx .right { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .tx .del { font-size: 12px; color: var(--muted); border: none; background: none; padding: 2px 0; }
+  .chip { display: inline-block; background: var(--chip); border-radius: 6px; padding: 1px 6px; font-size: 12px; margin-right: 4px; }
+  .empty { color: var(--muted); text-align: center; padding: 16px 0; }
+
+  dialog {
+    width: min(520px, calc(100vw - 32px)); border: 1px solid var(--border); border-radius: 16px;
+    background: var(--card); color: var(--text); padding: 0;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  .dlg { padding: 16px; }
+  .dlg h3 { margin: 0 0 12px; }
+  .seg { display: flex; background: var(--chip); border-radius: 10px; padding: 3px; margin-bottom: 14px; }
+  .seg button { flex: 1; border: none; background: none; padding: 8px 4px; font-size: 14px; }
+  .seg button.on { background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.15); font-weight: 600; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input, select {
+    width: 100%; font: inherit; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  }
+  .row { display: flex; gap: 10px; } .row > div { flex: 1; min-width: 0; }
+  .preview { margin-top: 14px; padding: 10px 12px; background: var(--chip); border-radius: 10px; font-size: 14px; }
+  .actions { display: flex; gap: 10px; margin-top: 16px; } .actions button { flex: 1; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Balance Tracker</h1>
+    <button class="link" id="settingsBtn">Settings</button>
+  </header>
+
+  <section class="card balance">
+    <div class="label" id="balLabel">Balance</div>
+    <div class="amount" id="balAmount">$0.00</div>
+    <div class="label" id="balSub"></div>
+    <button class="primary big" id="addBtn">+ Add transaction</button>
+  </section>
+
+  <h2>Transactions</h2>
+  <section class="card" id="txList"></section>
+</main>
+
+<!-- Add transaction -->
+<dialog id="txDlg">
+  <form class="dlg" id="txForm" method="dialog">
+    <h3>Add transaction</h3>
+    <div class="seg" id="typeSeg">
+      <button type="button" data-type="pickup" class="on">Pickup</button>
+      <button type="button" data-type="action">Action</button>
+      <button type="button" data-type="generic">Generic</button>
+    </div>
+
+    <div data-for="pickup">
+      <label for="pCasino">Casino</label>
+      <input id="pCasino" list="casinos" autocomplete="off">
+      <label for="pIdentity">Identity</label>
+      <input id="pIdentity" list="identities" autocomplete="off">
+      <div class="row">
+        <div><label for="pAmount">Pickup amount</label><input id="pAmount" type="number" inputmode="decimal" step="0.01" min="0"></div>
+        <div><label for="pPct">My %</label><input id="pPct" type="number" inputmode="decimal" step="0.01" min="0" max="100"></div>
+      </div>
+    </div>
+
+    <div data-for="action" hidden>
+      <div class="seg" id="sideSeg" style="margin-bottom:0">
+        <button type="button" data-side="bought" class="on">I bought action</button>
+        <button type="button" data-side="sold">I sold action</button>
+      </div>
+      <div class="row">
+        <div><label for="aCasino">Casino (optional)</label><input id="aCasino" list="casinos" autocomplete="off"></div>
+        <div><label for="aGame">Game (optional)</label><input id="aGame" autocomplete="off"></div>
+      </div>
+      <div class="row">
+        <div><label for="aResult">Result (+win / −loss)</label><input id="aResult" type="number" inputmode="decimal" step="0.01"></div>
+        <div><label for="aPct">My %</label><input id="aPct" type="number" inputmode="decimal" step="0.01" min="0" max="100"></div>
+      </div>
+      <div class="hint" id="actionHint"></div>
+    </div>
+
+    <div data-for="generic" hidden>
+      <label for="gDesc">Description</label>
+      <input id="gDesc" autocomplete="off">
+      <label for="gAmount">Amount</label>
+      <input id="gAmount" type="number" inputmode="decimal" step="0.01" min="0">
+      <div class="seg" id="dirSeg" style="margin:10px 0 0">
+        <button type="button" data-dir="1" class="on">I owe them</button>
+        <button type="button" data-dir="-1">They owe me</button>
+      </div>
+    </div>
+
+    <label for="tDate">Date</label>
+    <input id="tDate" type="date">
+
+    <div class="preview" id="preview"></div>
+    <div class="actions">
+      <button type="button" id="cancelBtn">Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Settings -->
+<dialog id="setDlg">
+  <form class="dlg" method="dialog">
+    <h3>Settings</h3>
+    <label for="sName">Other person's name</label>
+    <input id="sName" placeholder="Them">
+    <label for="sPct">Default my %</label>
+    <input id="sPct" type="number" inputmode="decimal" step="0.01" min="0" max="100">
+    <label>Backup</label>
+    <div class="row">
+      <div><button type="button" id="exportBtn" style="width:100%">Export JSON</button></div>
+      <div><button type="button" id="importBtn" style="width:100%">Import JSON</button></div>
+    </div>
+    <input type="file" id="importFile" accept="application/json,.json" hidden>
+    <div class="hint">Data is stored in this browser only. Export regularly to keep a backup.</div>
+    <div class="actions"><button type="submit" class="primary" id="saveSettings">Done</button></div>
+  </form>
+</dialog>
+
+<datalist id="casinos"></datalist>
+<datalist id="identities"></datalist>
+
+<script>
+const KEY = 'balance-tracker-v1';
+const $ = (id) => document.getElementById(id);
+
+// Balance convention: positive = I owe them, negative = they owe me.
+let state = load();
+
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem(KEY));
+    if (s && Array.isArray(s.transactions)) return { settings: {}, ...s };
+  } catch {}
+  return { settings: { name: '', defaultPct: '' }, transactions: [] };
+}
+function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
+
+const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : NaN; };
+const round2 = (n) => Math.round(n * 100) / 100;
+const fmt = (n) => (n < 0 ? '−' : '') + '$' + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtSigned = (n) => (n > 0 ? '+' : '') + fmt(n);
+const who = () => state.settings.name || 'them';
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+
+// Compute a transaction's effect on the balance from the form inputs.
+function compute(t) {
+  if (t.type === 'pickup') {
+    const cut = t.amount * t.pct / 100;
+    return { cut: round2(cut), delta: round2(t.amount - cut) };
+  }
+  if (t.type === 'action') {
+    const share = t.result * t.pct / 100;
+    // Bought: I own pct of their result → a win reduces what I owe them.
+    // Sold: they own pct of my result → a win increases what I owe them.
+    return { share: round2(share), delta: round2(t.side === 'bought' ? -share : share) };
+  }
+  return { delta: round2(t.amount * t.dir) };
+}
+
+function balance() { return round2(state.transactions.reduce((s, t) => s + t.delta, 0)); }
+
+function render() {
+  const b = balance();
+  $('balAmount').textContent = fmt(Math.abs(b));
+  $('balAmount').className = 'amount ' + (b > 0 ? 'neg' : b < 0 ? 'pos' : '');
+  $('balLabel').textContent = b > 0 ? `I owe ${who()}` : b < 0 ? theyOwe() : 'All square';
+  $('balSub').textContent = `${state.transactions.length} transaction${state.transactions.length === 1 ? '' : 's'}`;
+
+  const list = [...state.transactions].sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.createdAt - a.createdAt);
+  $('txList').innerHTML = list.length ? list.map(row).join('') : '<div class="empty">No transactions yet</div>';
+
+  const uniq = (k) => [...new Set(state.transactions.map((t) => t[k]).filter(Boolean))];
+  $('casinos').innerHTML = uniq('casino').map((c) => `<option value="${esc(c)}">`).join('');
+  $('identities').innerHTML = uniq('identity').map((c) => `<option value="${esc(c)}">`).join('');
+}
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const theyOwe = () => state.settings.name ? `${state.settings.name} owes me` : 'They owe me';
+
+function row(t) {
+  let title, meta;
+  if (t.type === 'pickup') {
+    title = `Pickup · ${esc(t.casino)}`;
+    meta = `<span class="chip">${esc(t.identity)}</span>${fmt(t.amount)} @ ${t.pct}% · my cut ${fmt(t.cut)}`;
+  } else if (t.type === 'action') {
+    title = `Action ${t.side} · ${esc([t.casino, t.game].filter(Boolean).join(' – ') || 'no details')}`;
+    meta = `Result ${fmtSigned(t.result)} @ ${t.pct}%`;
+  } else {
+    title = esc(t.desc);
+    meta = t.dir > 0 ? `I owe ${esc(who())}` : esc(theyOwe());
+  }
+  return `<div class="tx">
+    <div><div class="title">${title}</div><div class="meta">${t.date} · ${meta}</div></div>
+    <div class="right"><div class="${t.delta > 0 ? 'neg' : t.delta < 0 ? 'pos' : ''}">${fmtSigned(t.delta)}</div>
+    <button class="del" data-del="${t.id}">Delete</button></div>
+  </div>`;
+}
+
+// ----- Add transaction dialog -----
+let type = 'pickup', side = 'bought', dir = 1;
+
+function segment(segId, attr, onPick) {
+  $(segId).addEventListener('click', (e) => {
+    const btn = e.target.closest('button'); if (!btn) return;
+    $(segId).querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === btn));
+    onPick(btn.dataset[attr]); updatePreview();
+  });
+}
+segment('typeSeg', 'type', (v) => {
+  type = v;
+  document.querySelectorAll('[data-for]').forEach((el) => (el.hidden = el.dataset.for !== type));
+});
+segment('sideSeg', 'side', (v) => (side = v));
+segment('dirSeg', 'dir', (v) => (dir = Number(v)));
+
+function readForm() {
+  const date = $('tDate').value || today();
+  if (type === 'pickup') {
+    return { type, date, casino: $('pCasino').value.trim(), identity: $('pIdentity').value.trim(), amount: num($('pAmount').value), pct: num($('pPct').value) };
+  }
+  if (type === 'action') {
+    return { type, date, side, casino: $('aCasino').value.trim(), game: $('aGame').value.trim(), result: num($('aResult').value), pct: num($('aPct').value) };
+  }
+  return { type, date, desc: $('gDesc').value.trim(), amount: num($('gAmount').value), dir };
+}
+
+function validate(t) {
+  if (t.type === 'pickup') {
+    if (!t.casino) return 'Enter a casino';
+    if (!t.identity) return 'Enter an identity';
+    if (!(t.amount > 0)) return 'Enter a pickup amount';
+    if (!(t.pct >= 0 && t.pct <= 100)) return 'Enter my % (0–100)';
+  } else if (t.type === 'action') {
+    if (!Number.isFinite(t.result)) return 'Enter a result';
+    if (!(t.pct >= 0 && t.pct <= 100)) return 'Enter my % (0–100)';
+  } else {
+    if (!t.desc) return 'Enter a description';
+    if (!(t.amount > 0)) return 'Enter an amount';
+  }
+  return null;
+}
+
+function updatePreview() {
+  $('actionHint').textContent = side === 'bought'
+    ? `I own my % of ${who()}'s result.`
+    : `${cap(who())} owns my % of my result.`;
+  const t = readForm(), err = validate(t);
+  if (err) { $('preview').textContent = err; return; }
+  const c = compute(t), nb = round2(balance() + c.delta);
+  let line = '';
+  if (t.type === 'pickup') line = `My cut ${fmt(c.cut)} · `;
+  if (t.type === 'action') line = `Share ${fmtSigned(c.share)} · `;
+  $('preview').innerHTML = `${line}Balance change <b>${fmtSigned(c.delta)}</b> → ${nb > 0 ? `I owe ${esc(who())}` : nb < 0 ? esc(theyOwe()) : 'square'} <b>${fmt(Math.abs(nb))}</b>`;
+}
+$('txForm').addEventListener('input', updatePreview);
+
+$('addBtn').addEventListener('click', () => {
+  $('txForm').reset();
+  $('tDate').value = today();
+  if (state.settings.defaultPct !== '' && state.settings.defaultPct != null) {
+    $('pPct').value = $('aPct').value = state.settings.defaultPct;
+  }
+  updatePreview();
+  $('txDlg').showModal();
+});
+$('cancelBtn').addEventListener('click', () => $('txDlg').close());
+
+$('txForm').addEventListener('submit', (e) => {
+  const t = readForm(), err = validate(t);
+  if (err) { e.preventDefault(); $('preview').textContent = err; return; }
+  state.transactions.push({ ...t, ...compute(t), id: crypto.randomUUID?.() || String(Date.now() + Math.random()), createdAt: Date.now() });
+  save(); render();
+});
+
+$('txList').addEventListener('click', (e) => {
+  const id = e.target.dataset?.del; if (!id) return;
+  if (!confirm('Delete this transaction?')) return;
+  state.transactions = state.transactions.filter((t) => t.id !== id);
+  save(); render();
+});
+
+// ----- Settings -----
+$('settingsBtn').addEventListener('click', () => {
+  $('sName').value = state.settings.name || '';
+  $('sPct').value = state.settings.defaultPct ?? '';
+  $('setDlg').showModal();
+});
+$('saveSettings').addEventListener('click', () => {
+  state.settings.name = $('sName').value.trim();
+  state.settings.defaultPct = $('sPct').value;
+  save(); render();
+});
+$('exportBtn').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `balance-tracker-${today()}.json`;
+  a.click(); URL.revokeObjectURL(a.href);
+});
+$('importBtn').addEventListener('click', () => $('importFile').click());
+$('importFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0]; if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (!Array.isArray(data.transactions)) throw new Error('No transactions found');
+    if (!confirm(`Replace current data with ${data.transactions.length} imported transactions?`)) return;
+    state = { settings: {}, ...data };
+    save(); render(); $('setDlg').close();
+  } catch (err) { alert('Import failed: ' + err.message); }
+  e.target.value = '';
+});
+
+render();
+</script>
+</body>
+</html>
