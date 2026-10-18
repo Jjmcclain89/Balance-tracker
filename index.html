@@ -229,7 +229,7 @@
 <!-- Saved confirmation -->
 <dialog id="doneDlg">
   <form class="dlg" method="dialog">
-    <h3>Transaction saved</h3>
+    <h3 id="reportTitle">Transaction saved</h3>
     <pre class="report" id="reportText"></pre>
     <div class="actions">
       <button type="button" id="copyBtn">Copy report</button>
@@ -411,7 +411,7 @@ function row(t) {
   return `<div class="tx">
     <div><div class="title">${title}</div><div class="meta">${t.date} · ${meta}</div></div>
     <div class="right"><div class="${delta > 0 ? 'neg' : delta < 0 ? 'pos' : ''}">${fmtSigned(delta)}</div>
-    <button class="del" data-del="${t.id}">Delete</button></div>
+    <button class="del" data-report="${t.id}">Report</button> · <button class="del" data-del="${t.id}">Delete</button></div>
   </div>`;
 }
 
@@ -554,7 +554,17 @@ $('txForm').addEventListener('submit', async (e) => {
   }
 });
 
+// Balance just before t: every earlier transaction for the same person.
+const balanceBefore = (t) => round2(state.transactions
+  .filter((x) => x.person_id === t.person_id && byNewest(x, t) > 0)
+  .reduce((s, x) => s + Number(x.delta), 0));
+
 $('txList').addEventListener('click', async (e) => {
+  const rid = e.target.dataset?.report;
+  if (rid) {
+    const t = state.transactions.find((x) => x.id === rid);
+    return showReport(t, balanceBefore(t), 'Transaction report');
+  }
   const id = e.target.dataset?.del; if (!id) return;
   if (!confirm('Delete this transaction?')) return;
   const { error } = await db.from('transactions').delete().eq('id', id);
@@ -580,7 +590,6 @@ function report(t, start) {
   const lines = [];
   if (t.type === 'pickup') {
     lines.push(`${t.casino} Pickup ${t.identity} ${money(n('amount'))}`);
-    lines.push(`My cut: ${n('pct')}% (${money(n('cut'))})`);
   } else if (t.type === 'action') {
     lines.push([t.casino, t.game, `Action ${t.side === 'bought' ? 'Bought' : 'Sold'}`].filter(Boolean).join(' '));
     lines.push(`Result: ${plain(n('result'))} @ ${n('pct')}% = ${plain(n('share'))}`);
@@ -594,7 +603,8 @@ function report(t, start) {
   return lines.join('\n');
 }
 
-function showReport(t, start) {
+function showReport(t, start, title = 'Transaction saved') {
+  $('reportTitle').textContent = title;
   $('reportText').textContent = report(t, start);
   $('copyBtn').textContent = 'Copy report';
   $('doneDlg').showModal();
