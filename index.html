@@ -576,7 +576,8 @@ $('txList').addEventListener('click', async (e) => {
 // ----- Saved confirmation + copyable report -----
 // Compact money: $300, $300.50, -$200
 const money = (n) => (n < 0 ? '-' : '') + '$' + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 });
-const plain = (n) => (n > 0 ? '+' : n < 0 ? '-' : '') + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
+// Signed money: +$250, -$38, $0
+const plain = (n) => (n > 0 ? '+' : n < 0 ? '-' : '') + money(Math.abs(n));
 // "Josh McClain" → jm, "JM" → jm, "Mike" → m
 const initials = (name) => {
   const words = name.trim().split(/\s+/).filter(Boolean);
