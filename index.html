@@ -267,19 +267,23 @@ const txFor = (p) => state.transactions.filter((t) => t.person_id === p.id);
 const balanceOf = (p) => round2(txFor(p).reduce((s, t) => s + Number(t.delta), 0));
 const owesText = (p, b) => b > 0 ? `I owe ${p.name}` : b < 0 ? `${p.name} owes me` : 'All square';
 
+// Nearest dollar, with halves rounded away from zero (2.5 → 3, -2.5 → -3).
+const dollars = (n) => Math.sign(n) * Math.round(Math.abs(n)) || 0;
+
 // Compute a transaction's effect on the balance from the form inputs.
+// Balance changes are always whole dollars.
 function compute(t) {
   if (t.type === 'pickup') {
-    const cut = t.amount * t.pct / 100;
-    return { cut: round2(cut), delta: round2(t.amount - cut) };
+    const delta = dollars(t.amount - t.amount * t.pct / 100);
+    return { cut: round2(t.amount - delta), delta };
   }
   if (t.type === 'action') {
-    const share = t.result * t.pct / 100;
+    const share = dollars(t.result * t.pct / 100);
     // Bought: I own pct of their result → a win reduces what I owe them.
     // Sold: they own pct of my result → a win increases what I owe them.
-    return { share: round2(share), delta: round2(t.side === 'bought' ? -share : share) };
+    return { share, delta: t.side === 'bought' ? -share || 0 : share };
   }
-  return { delta: round2(t.amount * t.dir) };
+  return { delta: dollars(t.amount * t.dir) };
 }
 
 // ----- Data -----
