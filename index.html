@@ -177,6 +177,7 @@
       <div><label for="sMyName">Your name</label><input id="sMyName" placeholder="Me"></div>
       <div><label for="sName">Other person's name</label><input id="sName" placeholder="Them"></div>
     </div>
+    <div class="hint">Reports use initials, e.g. "Josh McClain" or "jm" → JM.</div>
     <label for="sPct">Default my %</label>
     <input id="sPct" type="number" inputmode="decimal" step="0.01" min="0" max="100">
     <label>Backup</label>
@@ -440,7 +441,13 @@ $('txList').addEventListener('click', async (e) => {
 // Compact money: $300, $300.50, -$200
 const money = (n) => (n < 0 ? '-' : '') + '$' + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 });
 const plain = (n) => (n > 0 ? '+' : n < 0 ? '-' : '') + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
-const owes = (b) => b > 0 ? `${state.settings.my_name || 'I'} owe${state.settings.my_name ? 's' : ''}` : b < 0 ? `${state.settings.name || 'they'} owe${state.settings.name ? 's' : ''}` : 'even';
+// "Josh McClain" → JM, "jm" → JM, "Mike" → M
+const initials = (name) => {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length > 1) return words.map((w) => w[0]).join('').toUpperCase();
+  return (words[0]?.length <= 3 ? words[0] : words[0]?.[0] ?? '').toUpperCase();
+};
+const owes = (b) => b > 0 ? `${initials(state.settings.my_name) || 'ME'} owes` : b < 0 ? `${initials(state.settings.name) || 'THEM'} owes` : 'even';
 
 function report(t, start) {
   const n = (k) => Number(t[k]);
