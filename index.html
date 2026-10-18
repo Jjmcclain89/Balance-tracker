@@ -73,6 +73,13 @@
     white-space: pre-wrap; font: 15px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
     background: var(--chip); border-radius: 10px; padding: 12px; margin: 0;
   }
+  .person { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 0; border-top: 1px solid var(--border); cursor: pointer; text-decoration: none; color: inherit; }
+  .person:first-child { border-top: none; }
+  .person .name { font-weight: 600; font-size: 17px; }
+  .person .right { text-align: right; font-variant-numeric: tabular-nums; }
+  .person .amt { font-weight: 600; }
+  a.link { color: var(--muted); text-decoration: none; padding: 6px 0; font-size: 16px; }
+  .danger { color: var(--neg); }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 </head>
@@ -94,26 +101,53 @@
 </main>
 
 <main id="appView" hidden>
-  <header>
-    <h1>Balance Tracker</h1>
-    <button class="link" id="settingsBtn">Settings</button>
-  </header>
+  <!-- People list -->
+  <div id="homeView">
+    <header>
+      <h1>Balance Tracker</h1>
+      <button class="link" id="settingsBtn">Settings</button>
+    </header>
+    <section class="card" id="peopleList"></section>
+    <button class="primary big" id="addPersonBtn">+ Add person</button>
+  </div>
 
-  <section class="card balance">
-    <div class="label" id="balLabel">Balance</div>
-    <div class="amount" id="balAmount">$0.00</div>
-    <div class="label" id="balSub"></div>
-    <button class="primary big" id="addBtn">+ Add transaction</button>
-  </section>
-
-  <h2>Transactions</h2>
-  <section class="card" id="txList"></section>
+  <!-- One person's page -->
+  <div id="personView" hidden>
+    <header>
+      <a class="link back" href="#">‹ People</a>
+      <button class="link" id="editPersonBtn">Edit</button>
+    </header>
+    <section class="card balance">
+      <div class="label" id="balName" style="font-weight:600;color:var(--text);font-size:16px"></div>
+      <div class="amount" id="balAmount">$0.00</div>
+      <div class="label" id="balLabel"></div>
+      <button class="primary big" id="addBtn">+ Add transaction</button>
+    </section>
+    <h2>Transactions</h2>
+    <section class="card" id="txList"></section>
+  </div>
 </main>
+
+<!-- Add / edit person -->
+<dialog id="personDlg">
+  <form class="dlg" id="personForm" method="dialog">
+    <h3 id="personDlgTitle">Add person</h3>
+    <label for="personName">Name</label>
+    <input id="personName" autocomplete="off" required>
+    <div class="hint">Reports use initials, e.g. "Ian Brown" or "ib" → ib.</div>
+    <div class="err" id="personErr"></div>
+    <div class="actions">
+      <button type="button" id="deletePersonBtn" class="danger">Delete</button>
+      <button type="button" id="personCancel">Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- Add transaction -->
 <dialog id="txDlg">
   <form class="dlg" id="txForm" method="dialog">
-    <h3>Add transaction</h3>
+    <h3 id="txDlgTitle">Add transaction</h3>
     <div class="seg" id="typeSeg">
       <button type="button" data-type="pickup" class="on">Pickup</button>
       <button type="button" data-type="action">Action</button>
@@ -153,8 +187,8 @@
       <label for="gAmount">Amount</label>
       <input id="gAmount" type="number" inputmode="decimal" step="0.01" min="0">
       <div class="seg" id="dirSeg" style="margin:10px 0 0">
-        <button type="button" data-dir="1" class="on">I owe them</button>
-        <button type="button" data-dir="-1">They owe me</button>
+        <button type="button" data-dir="1" class="on" id="dirIOwe">I owe them</button>
+        <button type="button" data-dir="-1" id="dirTheyOwe">They owe me</button>
       </div>
     </div>
 
@@ -173,10 +207,8 @@
 <dialog id="setDlg">
   <form class="dlg" method="dialog">
     <h3>Settings</h3>
-    <div class="row">
-      <div><label for="sMyName">Your name</label><input id="sMyName" placeholder="Me"></div>
-      <div><label for="sName">Other person's name</label><input id="sName" placeholder="Them"></div>
-    </div>
+    <label for="sMyName">Your name</label>
+    <input id="sMyName" placeholder="Me">
     <div class="hint">Reports use initials, e.g. "Josh McClain" or "jm" → jm.</div>
     <label for="sPct">Default my %</label>
     <input id="sPct" type="number" inputmode="decimal" step="0.01" min="0" max="100">
@@ -186,7 +218,7 @@
       <div><button type="button" id="importBtn" style="width:100%">Import JSON</button></div>
     </div>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
-    <div class="hint">Data is synced to Supabase. Import adds the file's transactions to your existing ones.</div>
+    <div class="hint">Data is synced to Supabase. Import adds the file's people and transactions to your existing ones.</div>
     <div class="actions">
       <button type="button" id="signOutBtn">Sign out</button>
       <button type="submit" class="primary" id="saveSettings">Done</button>
@@ -216,20 +248,24 @@ const LEGACY_KEY = 'balance-tracker-v1';
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = (id) => document.getElementById(id);
 
-// Balance convention: positive = I owe them, negative = they owe me.
-let state = { settings: { name: '', my_name: '', default_pct: null }, transactions: [] };
+// Balance convention (per person): positive = I owe them, negative = they owe me.
+const emptyState = () => ({ settings: { my_name: '', default_pct: null }, people: [], transactions: [] });
+let state = emptyState();
 let user = null;
+let current = null; // the person whose page is open
 
 const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : NaN; };
 const round2 = (n) => Math.round(n * 100) / 100;
 const fmt = (n) => (n < 0 ? '−' : '') + '$' + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtSigned = (n) => (n > 0 ? '+' : '') + fmt(n);
-const who = () => state.settings.name || 'them';
-const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-const theyOwe = () => state.settings.name ? `${state.settings.name} owes me` : 'They owe me';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 const busy = (el, on) => el.classList.toggle('loading', on);
+const byNewest = (a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at);
+
+const txFor = (p) => state.transactions.filter((t) => t.person_id === p.id);
+const balanceOf = (p) => round2(txFor(p).reduce((s, t) => s + Number(t.delta), 0));
+const owesText = (p, b) => b > 0 ? `I owe ${p.name}` : b < 0 ? `${p.name} owes me` : 'All square';
 
 // Compute a transaction's effect on the balance from the form inputs.
 function compute(t) {
@@ -246,20 +282,21 @@ function compute(t) {
   return { delta: round2(t.amount * t.dir) };
 }
 
-function balance() { return round2(state.transactions.reduce((s, t) => s + Number(t.delta), 0)); }
-
 // ----- Data -----
 async function loadData() {
   busy($('appView'), true);
-  const [tx, st] = await Promise.all([
+  const [pp, tx, st] = await Promise.all([
+    db.from('people').select('*').order('created_at'),
     db.from('transactions').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }),
-    db.from('settings').select('name, my_name, default_pct').maybeSingle(),
+    db.from('settings').select('my_name, default_pct').maybeSingle(),
   ]);
   busy($('appView'), false);
-  if (tx.error) return alert('Could not load transactions: ' + tx.error.message);
+  const err = pp.error || tx.error;
+  if (err) return alert('Could not load data: ' + err.message);
+  state.people = pp.data;
   state.transactions = tx.data;
   if (st.data) state.settings = st.data;
-  render();
+  route();
   offerLegacyImport();
 }
 
@@ -267,6 +304,19 @@ async function insertTransactions(rows) {
   const { data, error } = await db.from('transactions').insert(rows).select();
   if (error) throw error;
   return data;
+}
+
+async function createPerson(name) {
+  const { data, error } = await db.from('people').insert({ name }).select().single();
+  if (error) throw error;
+  state.people.push(data);
+  return data;
+}
+
+async function saveSettings(s) {
+  const { error } = await db.from('settings').upsert({ user_id: user.id, ...s, updated_at: new Date().toISOString() });
+  if (error) throw error;
+  state.settings = s;
 }
 
 // Old versions kept everything in localStorage; offer to upload it once.
@@ -279,44 +329,66 @@ async function offerLegacyImport() {
   try { localStorage.removeItem(LEGACY_KEY); } catch {}
 }
 
-// Accepts both exports from this version and the old localStorage format.
+// Accepts exports from this version (with people) and older single-person formats,
+// whose transactions go to a new person named after that file's settings.name.
 async function importData(data) {
   const cols = ['type', 'date', 'casino', 'identity', 'amount', 'pct', 'cut', 'side', 'game', 'result', 'share', 'description', 'dir', 'delta'];
-  const rows = data.transactions.map((t) => {
-    const r = { ...t, description: t.description ?? t.desc };
-    return Object.fromEntries(cols.filter((c) => r[c] !== undefined && r[c] !== '').map((c) => [c, r[c]]));
-  });
   try {
-    await insertTransactions(rows);
-    const s = data.settings || {};
-    const pct = s.default_pct ?? s.defaultPct;
-    if (s.name || (pct !== '' && pct != null)) {
-      await saveSettings({ ...state.settings, name: s.name || state.settings.name, default_pct: pct === '' ? null : pct ?? state.settings.default_pct });
+    const ids = {};
+    for (const p of data.people || []) ids[p.id] = (await createPerson(p.name)).id;
+    let fallback = null;
+    const personFor = async (t) => {
+      if (ids[t.person_id]) return ids[t.person_id];
+      fallback ??= (await createPerson(data.settings?.name || 'Imported')).id;
+      return fallback;
+    };
+    const rows = [];
+    for (const t of data.transactions) {
+      const r = { ...t, description: t.description ?? t.desc };
+      rows.push({ ...Object.fromEntries(cols.filter((c) => r[c] !== undefined && r[c] !== '' && r[c] !== null).map((c) => [c, r[c]])), person_id: await personFor(t) });
     }
+    if (rows.length) await insertTransactions(rows);
     await loadData();
   } catch (err) { alert('Import failed: ' + err.message); }
 }
 
-async function saveSettings(s) {
-  const { error } = await db.from('settings').upsert({ user_id: user.id, ...s, updated_at: new Date().toISOString() });
-  if (error) throw error;
-  state.settings = s;
+// ----- Routing: #p=<person id> opens that person's page -----
+function route() {
+  const id = new URLSearchParams(location.hash.slice(1)).get('p');
+  current = state.people.find((p) => p.id === id) || null;
+  $('homeView').hidden = !!current;
+  $('personView').hidden = !current;
+  render();
+  window.scrollTo(0, 0);
 }
+window.addEventListener('hashchange', route);
 
 // ----- Rendering -----
 function render() {
-  const b = balance();
+  if (!current) return renderHome();
+  const p = current, b = balanceOf(p), list = txFor(p);
+  $('balName').textContent = p.name;
   $('balAmount').textContent = fmt(Math.abs(b));
   $('balAmount').className = 'amount ' + (b > 0 ? 'neg' : b < 0 ? 'pos' : '');
-  $('balLabel').textContent = b > 0 ? `I owe ${who()}` : b < 0 ? theyOwe() : 'All square';
-  $('balSub').textContent = `${state.transactions.length} transaction${state.transactions.length === 1 ? '' : 's'}`;
-
-  const list = state.transactions;
+  $('balLabel').textContent = `${owesText(p, b)} · ${list.length} transaction${list.length === 1 ? '' : 's'}`;
   $('txList').innerHTML = list.length ? list.map(row).join('') : '<div class="empty">No transactions yet</div>';
 
-  const uniq = (k) => [...new Set(state.transactions.map((t) => t[k]).filter(Boolean))];
+  const uniq = (k) => [...new Set(list.map((t) => t[k]).filter(Boolean))];
   $('casinos').innerHTML = uniq('casino').map((c) => `<option value="${esc(c)}">`).join('');
   $('identities').innerHTML = uniq('identity').map((c) => `<option value="${esc(c)}">`).join('');
+}
+
+function renderHome() {
+  $('peopleList').innerHTML = state.people.length
+    ? state.people.map((p) => {
+        const b = balanceOf(p);
+        return `<a class="person" href="#p=${p.id}">
+          <div class="name">${esc(p.name)}</div>
+          <div class="right"><div class="amt ${b > 0 ? 'neg' : b < 0 ? 'pos' : ''}">${fmt(Math.abs(b))}</div>
+          <div class="meta hint" style="margin:0">${esc(owesText(p, b))}</div></div>
+        </a>`;
+      }).join('')
+    : '<div class="empty">No people yet. Add someone to start tracking.</div>';
 }
 
 function row(t) {
@@ -330,7 +402,7 @@ function row(t) {
     meta = `Result ${fmtSigned(Number(t.result))} @ ${Number(t.pct)}%`;
   } else {
     title = esc(t.description);
-    meta = t.dir > 0 ? `I owe ${esc(who())}` : esc(theyOwe());
+    meta = t.dir > 0 ? `I owe ${esc(current.name)}` : `${esc(current.name)} owes me`;
   }
   return `<div class="tx">
     <div><div class="title">${title}</div><div class="meta">${t.date} · ${meta}</div></div>
@@ -338,6 +410,54 @@ function row(t) {
     <button class="del" data-del="${t.id}">Delete</button></div>
   </div>`;
 }
+
+// ----- Add / edit person -----
+let editing = null;
+function openPersonDlg(p) {
+  editing = p;
+  $('personDlgTitle').textContent = p ? 'Edit person' : 'Add person';
+  $('personName').value = p?.name || '';
+  $('personErr').textContent = '';
+  $('deletePersonBtn').hidden = !p;
+  $('personDlg').showModal();
+}
+$('addPersonBtn').addEventListener('click', () => openPersonDlg(null));
+$('editPersonBtn').addEventListener('click', () => openPersonDlg(current));
+$('personCancel').addEventListener('click', () => $('personDlg').close());
+
+$('personForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('personName').value.trim();
+  if (!name) { $('personErr').textContent = 'Enter a name'; return; }
+  busy($('personForm'), true);
+  try {
+    if (editing) {
+      const { error } = await db.from('people').update({ name }).eq('id', editing.id);
+      if (error) throw error;
+      editing.name = name;
+      render();
+    } else {
+      const p = await createPerson(name);
+      location.hash = `p=${p.id}`;
+    }
+    $('personDlg').close();
+  } catch (err) {
+    $('personErr').textContent = err.message;
+  } finally {
+    busy($('personForm'), false);
+  }
+});
+
+$('deletePersonBtn').addEventListener('click', async () => {
+  const p = editing, n = txFor(p).length;
+  if (!confirm(`Delete ${p.name}${n ? ` and their ${n} transaction${n === 1 ? '' : 's'}` : ''}? This can't be undone.`)) return;
+  const { error } = await db.from('people').delete().eq('id', p.id);
+  if (error) { $('personErr').textContent = error.message; return; }
+  state.people = state.people.filter((x) => x.id !== p.id);
+  state.transactions = state.transactions.filter((t) => t.person_id !== p.id);
+  $('personDlg').close();
+  location.hash = '';
+});
 
 // ----- Add transaction dialog -----
 let type = 'pickup', side = 'bought', dir = 1;
@@ -384,21 +504,23 @@ function validate(t) {
 }
 
 function updatePreview() {
-  $('actionHint').textContent = side === 'bought'
-    ? `I own my % of ${who()}'s result.`
-    : `${cap(who())} owns my % of my result.`;
+  const name = current.name;
+  $('actionHint').textContent = side === 'bought' ? `I own my % of ${name}'s result.` : `${name} owns my % of my result.`;
   const t = readForm(), err = validate(t);
   if (err) { $('preview').textContent = err; return; }
-  const c = compute(t), nb = round2(balance() + c.delta);
+  const c = compute(t), nb = round2(balanceOf(current) + c.delta);
   let line = '';
   if (t.type === 'pickup') line = `My cut ${fmt(c.cut)} · `;
   if (t.type === 'action') line = `Share ${fmtSigned(c.share)} · `;
-  $('preview').innerHTML = `${line}Balance change <b>${fmtSigned(c.delta)}</b> → ${nb > 0 ? `I owe ${esc(who())}` : nb < 0 ? esc(theyOwe()) : 'square'} <b>${fmt(Math.abs(nb))}</b>`;
+  $('preview').innerHTML = `${line}Balance change <b>${fmtSigned(c.delta)}</b> → ${esc(owesText(current, nb))} <b>${fmt(Math.abs(nb))}</b>`;
 }
 $('txForm').addEventListener('input', updatePreview);
 
 $('addBtn').addEventListener('click', () => {
   $('txForm').reset();
+  $('txDlgTitle').textContent = `Add transaction · ${current.name}`;
+  $('dirIOwe').textContent = `I owe ${current.name}`;
+  $('dirTheyOwe').textContent = `${current.name} owes me`;
   $('tDate').value = today();
   if (state.settings.default_pct != null) {
     $('pPct').value = $('aPct').value = Number(state.settings.default_pct);
@@ -414,10 +536,10 @@ $('txForm').addEventListener('submit', async (e) => {
   if (err) { $('preview').textContent = err; return; }
   busy($('txForm'), true);
   try {
-    const start = balance();
-    const [saved] = await insertTransactions([{ ...t, ...compute(t) }]);
+    const start = balanceOf(current);
+    const [saved] = await insertTransactions([{ ...t, ...compute(t), person_id: current.id }]);
     state.transactions.push(saved);
-    state.transactions.sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at));
+    state.transactions.sort(byNewest);
     render();
     $('txDlg').close();
     showReport(saved, start);
@@ -447,7 +569,7 @@ const initials = (name) => {
   if (words.length > 1) return words.map((w) => w[0]).join('').toLowerCase();
   return (words[0]?.length <= 3 ? words[0] : words[0]?.[0] ?? '').toLowerCase();
 };
-const owes = (b) => b > 0 ? `${initials(state.settings.my_name) || 'me'} owes` : b < 0 ? `${initials(state.settings.name) || 'them'} owes` : 'even';
+const owes = (b) => b > 0 ? `${initials(state.settings.my_name) || 'me'} owes` : b < 0 ? `${initials(current.name) || 'them'} owes` : 'even';
 
 function report(t, start) {
   const n = (k) => Number(t[k]);
@@ -489,7 +611,6 @@ $('copyBtn').addEventListener('click', async () => {
 
 // ----- Settings -----
 $('settingsBtn').addEventListener('click', () => {
-  $('sName').value = state.settings.name || '';
   $('sMyName').value = state.settings.my_name || '';
   $('sPct').value = state.settings.default_pct ?? '';
   $('setDlg').showModal();
@@ -497,7 +618,7 @@ $('settingsBtn').addEventListener('click', () => {
 $('saveSettings').addEventListener('click', async () => {
   const pct = $('sPct').value;
   try {
-    await saveSettings({ name: $('sName').value.trim(), my_name: $('sMyName').value.trim(), default_pct: pct === '' ? null : num(pct) });
+    await saveSettings({ my_name: $('sMyName').value.trim(), default_pct: pct === '' ? null : num(pct) });
     render();
   } catch (err) { alert('Could not save settings: ' + err.message); }
 });
@@ -515,7 +636,8 @@ $('importFile').addEventListener('change', async (e) => {
   try {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data.transactions)) throw new Error('No transactions found');
-    if (!confirm(`Add ${data.transactions.length} transactions from this file?`)) return;
+    const np = data.people?.length || 0;
+    if (!confirm(`Add ${np ? `${np} people and ` : ''}${data.transactions.length} transactions from this file?`)) return;
     $('setDlg').close();
     await importData(data);
   } catch (err) { alert('Import failed: ' + err.message); }
@@ -548,7 +670,7 @@ db.auth.onAuthStateChange((_event, session) => {
   $('authView').hidden = !!user;
   $('appView').hidden = !user;
   if (!changed) return;
-  state = { settings: { name: '', my_name: '', default_pct: null }, transactions: [] };
+  state = emptyState();
   // Defer so Supabase calls don't run inside the auth callback.
   if (user) setTimeout(loadData, 0);
 });
