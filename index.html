@@ -189,8 +189,12 @@
         <div><label for="aGame">Game (optional)</label><input id="aGame" autocomplete="off"></div>
       </div>
       <div class="row">
-        <div><label for="aResult">Result (+win / −loss)</label><input id="aResult" type="number" inputmode="decimal" step="0.01"></div>
+        <div><label for="aResult">Result</label><input id="aResult" type="number" inputmode="decimal" step="0.01" min="0"></div>
         <div><label for="aPct">My %</label><input id="aPct" type="number" inputmode="decimal" step="0.01" min="0" max="100"></div>
+      </div>
+      <div class="seg" id="resultSeg" style="margin:10px 0 0">
+        <button type="button" data-sign="1" class="on">Won</button>
+        <button type="button" data-sign="-1">Lost</button>
       </div>
       <div class="hint" id="actionHint"></div>
     </div>
@@ -479,7 +483,7 @@ $('deletePersonBtn').addEventListener('click', async () => {
 });
 
 // ----- Add transaction dialog -----
-let type = 'pickup', side = 'bought', dir = 1;
+let type = 'pickup', side = 'bought', dir = 1, resultSign = 1;
 
 function segment(segId, attr, onPick) {
   $(segId).addEventListener('click', (e) => {
@@ -494,6 +498,7 @@ segment('typeSeg', 'type', (v) => {
 });
 segment('sideSeg', 'side', (v) => (side = v));
 segment('dirSeg', 'dir', (v) => (dir = Number(v)));
+segment('resultSeg', 'sign', (v) => (resultSign = Number(v)));
 
 function readForm() {
   const date = $('tDate').value || today();
@@ -501,7 +506,7 @@ function readForm() {
     return { type, date, casino: $('pCasino').value.trim(), identity: $('pIdentity').value.trim(), amount: num($('pAmount').value), pct: num($('pPct').value) };
   }
   if (type === 'action') {
-    return { type, date, side, casino: $('aCasino').value.trim() || null, game: $('aGame').value.trim() || null, result: num($('aResult').value), pct: num($('aPct').value) };
+    return { type, date, side, casino: $('aCasino').value.trim() || null, game: $('aGame').value.trim() || null, result: resultSign * Math.abs(num($('aResult').value)), pct: num($('aPct').value) };
   }
   return { type, date, description: $('gDesc').value.trim(), amount: num($('gAmount').value), dir };
 }
