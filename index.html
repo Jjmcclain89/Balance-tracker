@@ -80,6 +80,11 @@
   .person .amt { font-weight: 600; }
   a.link { color: var(--muted); text-decoration: none; padding: 6px 0; font-size: 16px; }
   .danger { color: var(--neg); }
+  .txhead { display: flex; justify-content: space-between; align-items: baseline; margin: 24px 4px 8px; }
+  .txhead h2 { margin: 0; }
+  .massrow { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding: 10px 12px; }
+  .massrow input { width: 72px; flex: none; padding: 8px 10px; }
+  .massrow button { margin-left: auto; padding: 8px 14px; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 </head>
@@ -123,7 +128,16 @@
       <div class="label" id="balLabel"></div>
       <button class="primary big" id="addBtn">+ Add transaction</button>
     </section>
-    <h2>Transactions</h2>
+    <div class="txhead">
+      <h2>Transactions</h2>
+      <button class="link" id="massBtn">Mass report</button>
+    </div>
+    <form class="card massrow" id="massForm" hidden>
+      <label for="massCount" style="margin:0;white-space:nowrap">Last</label>
+      <input id="massCount" type="number" inputmode="numeric" min="1" step="1">
+      <span class="hint" style="margin:0">transactions</span>
+      <button type="submit" class="primary">Generate</button>
+    </form>
     <section class="card" id="txList"></section>
   </div>
 </main>
@@ -362,6 +376,7 @@ function route() {
   current = state.people.find((p) => p.id === id) || null;
   $('homeView').hidden = !!current;
   $('personView').hidden = !current;
+  $('massForm').hidden = true;
   render();
   window.scrollTo(0, 0);
 }
@@ -559,6 +574,25 @@ const balanceBefore = (t) => round2(state.transactions
   .filter((x) => x.person_id === t.person_id && byNewest(x, t) > 0)
   .reduce((s, x) => s + Number(x.delta), 0));
 
+$('massBtn').addEventListener('click', () => {
+  const n = txFor(current).length;
+  if (!n) return alert('No transactions yet');
+  const form = $('massForm');
+  form.hidden = !form.hidden;
+  if (form.hidden) return;
+  $('massCount').value = Math.min(5, n);
+  $('massCount').focus();
+  $('massCount').select();
+});
+
+$('massForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const all = txFor(current), x = Math.min(Math.floor(num($('massCount').value)), all.length);
+  if (!(x >= 1)) return $('massCount').focus();
+  const list = all.slice(0, x).reverse(); // txFor is newest first; report oldest first
+  openReport(`Report · last ${x} transaction${x === 1 ? '' : 's'}`, massReport(list, balanceBefore(list[0])));
+});
+
 $('txList').addEventListener('click', async (e) => {
   const rid = e.target.dataset?.report;
   if (rid) {
@@ -586,7 +620,8 @@ const initials = (name) => {
 };
 const owes = (b) => b > 0 ? `${initials(state.settings.my_name) || 'me'} owes` : b < 0 ? `${initials(current.name) || 'them'} owes` : 'even';
 
-function report(t, start) {
+// Title, details and change lines for one transaction.
+function txLines(t) {
   const n = (k) => Number(t[k]);
   const lines = [];
   if (t.type === 'pickup') {
@@ -597,16 +632,36 @@ function report(t, start) {
   } else {
     lines.push(t.description);
   }
-  const end = round2(start + n('delta'));
   lines.push(`Change: ${plain(n('delta'))}`);
-  lines.push(`Starting Balance: ${money(start)}`);
-  lines.push(`New Balance: ${money(Math.abs(end))} (${owes(end)})`);
-  return lines.join('\n');
+  return lines;
+}
+
+const newBalanceLine = (end) => `New Balance: ${money(Math.abs(end))} (${owes(end)})`;
+
+function report(t, start) {
+  const end = round2(start + Number(t.delta));
+  return [...txLines(t), `Starting Balance: ${money(start)}`, newBalanceLine(end)].join('\n');
+}
+
+// Several transactions (given oldest first) in one report.
+function massReport(list, start) {
+  const total = round2(list.reduce((s, t) => s + Number(t.delta), 0));
+  return [
+    `Starting Balance: ${money(start)}`,
+    ...list.map((t) => '\n' + txLines(t).join('\n')),
+    '',
+    `Total Change: ${plain(total)}`,
+    newBalanceLine(round2(start + total)),
+  ].join('\n');
 }
 
 function showReport(t, start, title = 'Transaction saved') {
+  openReport(title, report(t, start));
+}
+
+function openReport(title, text) {
   $('reportTitle').textContent = title;
-  $('reportText').textContent = report(t, start);
+  $('reportText').textContent = text;
   $('copyBtn').textContent = 'Copy report';
   $('doneDlg').showModal();
 }
