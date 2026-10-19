@@ -266,7 +266,7 @@
     </div>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
     <div class="hint">Data is synced to Supabase. Import adds the file's people and transactions to your existing ones.</div>
-    <div class="hint">Version 2026-10-19.1</div>
+    <div class="hint">Version 2026-10-19.2</div>
     <div class="actions">
       <button type="button" id="signOutBtn">Sign out</button>
       <button type="submit" class="primary" id="saveSettings">Done</button>
@@ -330,10 +330,15 @@ function compute(t) {
     return { cut: round2(t.amount - delta), delta };
   }
   if (t.type === 'action') {
-    const share = dollars(t.result * t.pct / 100);
-    // Bought: I own pct of their result → a win reduces what I owe them.
-    // Sold: they own pct of my result → a win increases what I owe them.
-    return { share, delta: t.side === 'bought' ? -share || 0 : share };
+    // My % is always the part I hold. share is the part that changes hands:
+    // Bought: I hold pct of their result → a win reduces what I owe them.
+    // Sold: I keep pct of my result, they hold the rest → a win increases what I owe them.
+    if (t.side === 'bought') {
+      const share = dollars(t.result * t.pct / 100);
+      return { share, delta: -share || 0 };
+    }
+    const share = dollars(t.result * (100 - t.pct) / 100);
+    return { share, delta: share };
   }
   return { delta: dollars(t.amount * t.dir) };
 }
@@ -456,7 +461,7 @@ function row(t) {
     meta = `<span class="chip">${esc(t.identity)}</span>${fmt(Number(t.amount))} @ ${Number(t.pct)}% · my cut ${fmt(Number(t.cut))}`;
   } else if (t.type === 'action') {
     title = `Action ${t.side} · ${esc([t.casino, t.game].filter(Boolean).join(' – ') || 'no details')}`;
-    meta = `Result ${fmtSigned(Number(t.result))} @ ${Number(t.pct)}%`;
+    meta = `Result ${fmtSigned(Number(t.result))} · ${t.side === 'sold' ? `kept ${Number(t.pct)}%` : `${Number(t.pct)}%`}`;
   } else {
     title = esc(t.description);
     meta = t.dir > 0 ? `I owe ${esc(current.name)}` : `${esc(current.name)} owes me`;
@@ -596,7 +601,8 @@ function validate(t) {
 
 function updatePreview() {
   const name = current.name;
-  $('actionHint').textContent = side === 'bought' ? `I own my % of ${name}'s result.` : `${name} owns my % of my result.`;
+  const pct = pctOf('a'), sold = Number.isFinite(pct) ? `${round2(100 - pct)}%` : 'the rest';
+  $('actionHint').textContent = side === 'bought' ? `My % is my share of ${name}'s result.` : `My % is the share of my result I keep; ${name} has ${sold}.`;
   const t = readForm(), err = validate(t);
   if (err) { $('preview').textContent = err; return; }
   const c = compute(t), nb = round2(balanceOf(current) + c.delta);
@@ -701,7 +707,9 @@ function txLines(t) {
     lines.push(`${t.casino} Pickup ${t.identity} ${money(n('amount'))}`);
   } else if (t.type === 'action') {
     lines.push([t.casino, t.game, `Action ${t.side === 'bought' ? 'Bought' : 'Sold'}`].filter(Boolean).join(' '));
-    lines.push(`Result: ${plain(n('result'))} @ ${n('pct')}% = ${plain(n('share'))}`);
+    lines.push(t.side === 'sold'
+      ? `Result: ${plain(n('result'))}, sold ${round2(100 - n('pct'))}% = ${plain(n('share'))}`
+      : `Result: ${plain(n('result'))} @ ${n('pct')}% = ${plain(n('share'))}`);
   } else {
     lines.push(t.description);
   }
