@@ -80,6 +80,18 @@
   .person .amt { font-weight: 600; }
   a.link { color: var(--muted); text-decoration: none; padding: 6px 0; font-size: 16px; }
   .danger { color: var(--neg); }
+  .pct { display: flex; gap: 6px; }
+  .pct label { flex: 1; margin: 0; display: flex; cursor: pointer; }
+  .pct input[type=radio] { position: absolute; opacity: 0; pointer-events: none; }
+  .pct span, .pct input[type=number] {
+    flex: 1; min-width: 0; text-align: center; padding: 10px 4px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; font-weight: 600;
+  }
+  .pct .custom { flex: 1.6; }
+  .pct label:has(input[type=radio]:checked) span,
+  .pct label:has(input[type=radio]:checked) input[type=number] { border-color: var(--accent); background: var(--accent); color: #fff; }
+  .pct label:has(input[type=radio]:checked) input[type=number]::placeholder { color: rgba(255,255,255,.75); }
+  .pct label:has(input:focus-visible) span { outline: 2px solid var(--accent); outline-offset: 2px; }
   .txhead { display: flex; justify-content: space-between; align-items: baseline; margin: 24px 4px 8px; }
   .txhead h2 { margin: 0; }
   .massrow { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding: 10px 12px; }
@@ -173,9 +185,14 @@
       <input id="pCasino" list="casinos" autocomplete="off">
       <label for="pIdentity">Identity</label>
       <input id="pIdentity" list="identities" autocomplete="off">
-      <div class="row">
-        <div><label for="pAmount">Pickup amount</label><input id="pAmount" type="number" inputmode="decimal" step="0.01" min="0"></div>
-        <div><label for="pPct">My %</label><input id="pPct" type="number" inputmode="decimal" step="0.01" min="0" max="100"></div>
+      <label for="pAmount">Pickup amount</label>
+      <input id="pAmount" type="number" inputmode="decimal" step="0.01" min="0">
+      <label>My %</label>
+      <div class="pct" id="pPctPick">
+        <label><input type="radio" name="pPctSel" value="25"><span>1/4</span></label>
+        <label><input type="radio" name="pPctSel" value="33.333333333333336"><span>1/3</span></label>
+        <label><input type="radio" name="pPctSel" value="50"><span>1/2</span></label>
+        <label class="custom"><input type="radio" name="pPctSel" value="custom"><input id="pPct" type="number" inputmode="decimal" step="0.01" min="0" max="100" placeholder="Other %" aria-label="Other %"></label>
       </div>
     </div>
 
@@ -188,9 +205,14 @@
         <div><label for="aCasino">Casino (optional)</label><input id="aCasino" list="casinos" autocomplete="off"></div>
         <div><label for="aGame">Game (optional)</label><input id="aGame" autocomplete="off"></div>
       </div>
-      <div class="row">
-        <div><label for="aResult">Result (−loss / +win)</label><input id="aResult" type="number" step="0.01" placeholder="e.g. -400"></div>
-        <div><label for="aPct">My %</label><input id="aPct" type="number" inputmode="decimal" step="0.01" min="0" max="100"></div>
+      <label for="aResult">Result (−loss / +win)</label>
+      <input id="aResult" type="number" step="0.01" placeholder="e.g. -400">
+      <label>My %</label>
+      <div class="pct" id="aPctPick">
+        <label><input type="radio" name="aPctSel" value="25"><span>1/4</span></label>
+        <label><input type="radio" name="aPctSel" value="33.333333333333336"><span>1/3</span></label>
+        <label><input type="radio" name="aPctSel" value="50"><span>1/2</span></label>
+        <label class="custom"><input type="radio" name="aPctSel" value="custom"><input id="aPct" type="number" inputmode="decimal" step="0.01" min="0" max="100" placeholder="Other %" aria-label="Other %"></label>
       </div>
       <div class="hint" id="actionHint"></div>
     </div>
@@ -495,13 +517,35 @@ segment('typeSeg', 'type', (v) => {
 segment('sideSeg', 'side', (v) => (side = v));
 segment('dirSeg', 'dir', (v) => (dir = Number(v)));
 
+// ----- My % picker: 1/4, 1/3, 1/2 or a custom number -----
+function pctOf(prefix) {
+  const sel = document.querySelector(`input[name=${prefix}PctSel]:checked`);
+  if (!sel) return NaN;
+  return sel.value === 'custom' ? num($(prefix + 'Pct').value) : Number(sel.value);
+}
+
+function setPct(prefix, pct) {
+  const radios = [...document.querySelectorAll(`input[name=${prefix}PctSel]`)];
+  const preset = radios.find((r) => r.value !== 'custom' && Math.abs(Number(r.value) - pct) < 0.01);
+  const pick = preset || radios.find((r) => r.value === 'custom');
+  pick.checked = true;
+  $(prefix + 'Pct').value = preset ? '' : pct;
+}
+
+for (const prefix of ['p', 'a']) {
+  const custom = document.querySelector(`input[name=${prefix}PctSel][value=custom]`);
+  // Typing in the box picks "custom"; picking "custom" puts the cursor in the box.
+  $(prefix + 'Pct').addEventListener('focus', () => { custom.checked = true; updatePreview(); });
+  custom.addEventListener('change', () => $(prefix + 'Pct').focus());
+}
+
 function readForm() {
   const date = $('tDate').value || today();
   if (type === 'pickup') {
-    return { type, date, casino: $('pCasino').value.trim(), identity: $('pIdentity').value.trim(), amount: num($('pAmount').value), pct: num($('pPct').value) };
+    return { type, date, casino: $('pCasino').value.trim(), identity: $('pIdentity').value.trim(), amount: num($('pAmount').value), pct: pctOf('p') };
   }
   if (type === 'action') {
-    return { type, date, side, casino: $('aCasino').value.trim() || null, game: $('aGame').value.trim() || null, result: num($('aResult').value), pct: num($('aPct').value) };
+    return { type, date, side, casino: $('aCasino').value.trim() || null, game: $('aGame').value.trim() || null, result: num($('aResult').value), pct: pctOf('a') };
   }
   return { type, date, description: $('gDesc').value.trim(), amount: num($('gAmount').value), dir };
 }
@@ -511,10 +555,10 @@ function validate(t) {
     if (!t.casino) return 'Enter a casino';
     if (!t.identity) return 'Enter an identity';
     if (!(t.amount > 0)) return 'Enter a pickup amount';
-    if (!(t.pct >= 0 && t.pct <= 100)) return 'Enter my % (0–100)';
+    if (!(t.pct >= 0 && t.pct <= 100)) return 'Pick my % (or enter 0–100)';
   } else if (t.type === 'action') {
     if (!Number.isFinite(t.result)) return 'Enter a result';
-    if (!(t.pct >= 0 && t.pct <= 100)) return 'Enter my % (0–100)';
+    if (!(t.pct >= 0 && t.pct <= 100)) return 'Pick my % (or enter 0–100)';
   } else {
     if (!t.description) return 'Enter a description';
     if (!(t.amount > 0)) return 'Enter an amount';
@@ -542,7 +586,8 @@ $('addBtn').addEventListener('click', () => {
   $('dirTheyOwe').textContent = `${current.name} owes me`;
   $('tDate').value = today();
   if (state.settings.default_pct != null) {
-    $('pPct').value = $('aPct').value = Number(state.settings.default_pct);
+    setPct('p', Number(state.settings.default_pct));
+    setPct('a', Number(state.settings.default_pct));
   }
   updatePreview();
   $('txDlg').showModal();
