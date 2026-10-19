@@ -266,7 +266,7 @@
     </div>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
     <div class="hint">Data is synced to Supabase. Import adds the file's people and transactions to your existing ones.</div>
-    <div class="hint">Version 2026-10-19.2</div>
+    <div class="hint">Version 2026-10-19.3</div>
     <div class="actions">
       <button type="button" id="signOutBtn">Sign out</button>
       <button type="submit" class="primary" id="saveSettings">Done</button>
@@ -721,7 +721,8 @@ const newBalanceLine = (end) => `New Balance: ${money(Math.abs(end))} (${owes(en
 
 function report(t, start) {
   const end = round2(start + Number(t.delta));
-  return [...txLines(t), `Starting Balance: ${money(start)}`, newBalanceLine(end)].join('\n');
+  const lines = txLines(t), change = lines.pop(); // move Change below Starting Balance
+  return [...lines, `Starting Balance: ${money(start)}`, change, newBalanceLine(end)].join('\n');
 }
 
 // Several transactions (given oldest first) in one report.
