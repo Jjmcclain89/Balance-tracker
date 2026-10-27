@@ -200,8 +200,8 @@
 
     <div data-for="action" hidden>
       <div class="seg" id="sideSeg" style="margin-bottom:0">
-        <button type="button" data-side="bought" class="on">I bought action</button>
-        <button type="button" data-side="sold">I sold action</button>
+        <button type="button" data-side="sold" class="on">I sold action</button>
+        <button type="button" data-side="bought">I bought action</button>
       </div>
       <div class="row">
         <div><label for="aCasino">Casino (optional)</label><input id="aCasino" list="casinos" autocomplete="off"></div>
@@ -266,7 +266,7 @@
     </div>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
     <div class="hint">Data is synced to Supabase. Import adds the file's people and transactions to your existing ones.</div>
-    <div class="hint">Version 2026-10-19.3</div>
+    <div class="hint">Version 2026-10-27.1</div>
     <div class="actions">
       <button type="button" id="signOutBtn">Sign out</button>
       <button type="submit" class="primary" id="saveSettings">Done</button>
@@ -322,11 +322,18 @@ const owesText = (p, b) => b > 0 ? `I owe ${p.name}` : b < 0 ? `${p.name} owes m
 // Nearest dollar, with halves rounded away from zero (2.5 → 3, -2.5 → -3).
 const dollars = (n) => Math.sign(n) * Math.round(Math.abs(n)) || 0;
 
+// Whole-dollar rounding that favors one side. Positive balance = I owe them, so
+// rounding down favors me and rounding up favors them. round2 first so float noise
+// (e.g. 200.00000000000003) doesn't push an exact amount to the next dollar.
+const favorMe = (n) => Math.floor(round2(n)) || 0;
+const favorThem = (n) => Math.ceil(round2(n)) || 0;
+
 // Compute a transaction's effect on the balance from the form inputs.
-// Balance changes are always whole dollars.
+// Balance changes are whole dollars, rounded in favor of whoever did the pickup or played:
+// pickups and sold action favor me, bought action favors them.
 function compute(t) {
   if (t.type === 'pickup') {
-    const delta = dollars(t.amount - t.amount * t.pct / 100);
+    const delta = favorMe(t.amount - t.amount * t.pct / 100);
     return { cut: round2(t.amount - delta), delta };
   }
   if (t.type === 'action') {
@@ -334,11 +341,11 @@ function compute(t) {
     // Bought: I hold pct of their result → a win reduces what I owe them.
     // Sold: I keep pct of my result, they hold the rest → a win increases what I owe them.
     if (t.side === 'bought') {
-      const share = dollars(t.result * t.pct / 100);
-      return { share, delta: -share || 0 };
+      const delta = favorThem(-t.result * t.pct / 100);
+      return { share: -delta || 0, delta };
     }
-    const share = dollars(t.result * (100 - t.pct) / 100);
-    return { share, delta: share };
+    const delta = favorMe(t.result * (100 - t.pct) / 100);
+    return { share: delta, delta };
   }
   return { delta: dollars(t.amount * t.dir) };
 }
@@ -522,7 +529,7 @@ $('deletePersonBtn').addEventListener('click', async () => {
 });
 
 // ----- Add transaction dialog -----
-let type = 'pickup', side = 'bought', dir = 1;
+let type = 'pickup', side = 'sold', dir = 1;
 
 function segment(segId, attr, onPick) {
   $(segId).addEventListener('click', (e) => {
@@ -619,6 +626,8 @@ $('addBtn').addEventListener('click', () => {
   $('dirIOwe').textContent = `I owe ${current.name}`;
   $('dirTheyOwe').textContent = `${current.name} owes me`;
   $('tDate').value = today();
+  side = 'sold'; // always start on "I sold action"
+  $('sideSeg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.side === side));
   if (state.settings.default_pct != null) {
     setPct('p', Number(state.settings.default_pct));
     setPct('a', Number(state.settings.default_pct));
