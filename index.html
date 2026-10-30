@@ -266,7 +266,7 @@
     </div>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
     <div class="hint">Data is synced to Supabase. Import adds the file's people and transactions to your existing ones.</div>
-    <div class="hint">Version 2026-10-30.1</div>
+    <div class="hint">Version 2026-10-30.2</div>
     <div class="actions">
       <button type="button" id="signOutBtn">Sign out</button>
       <button type="submit" class="primary" id="saveSettings">Done</button>
@@ -615,7 +615,8 @@ function updatePreview() {
   const c = compute(t), nb = round2(balanceOf(current) + c.delta);
   let line = '';
   if (t.type === 'pickup') line = `My cut ${fmt(c.cut)} · `;
-  if (t.type === 'action') line = `Share ${fmtSigned(c.share)} · `;
+  // Sold: share is their part, so mine is the rest of the result. Bought: share is mine.
+  if (t.type === 'action') line = `My share: ${fmtSigned(t.side === 'sold' ? round2(t.result - c.share) : c.share)} · `;
   $('preview').innerHTML = `${line}Balance change <b>${fmtSigned(c.delta)}</b> → ${esc(owesText(current, nb))} <b>${fmt(Math.abs(nb))}</b>`;
 }
 $('txForm').addEventListener('input', updatePreview);
