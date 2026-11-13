@@ -35,6 +35,8 @@
   }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   button.big { width: 100%; padding: 14px; margin-top: 12px; font-size: 17px; }
+  #discordBtn { background: #5865f2; border-color: #5865f2; color: #fff; font-weight: 600; }
+  #discordBtn:disabled { opacity: .7; }
   button.link { border: none; background: none; color: var(--muted); padding: 6px; }
   h2 { font-size: 15px; color: var(--muted); font-weight: 600; margin: 24px 4px 8px; }
   .tx { display: flex; gap: 12px; justify-content: space-between; padding: 12px 0; border-top: 1px solid var(--border); }
@@ -163,6 +165,9 @@
     <label for="personName">Name</label>
     <input id="personName" autocomplete="off" required>
     <div class="hint">Reports use initials, e.g. "Ian Brown" or "ib" → ib.</div>
+    <label for="personDiscord">Discord user ID (optional)</label>
+    <input id="personDiscord" inputmode="numeric" autocomplete="off" placeholder="e.g. 123456789012345678">
+    <div class="hint">Lets you DM reports to them. In Discord: Settings → Advanced → Developer Mode on, then right-click (or long-press) them → Copy User ID.</div>
     <div class="err" id="personErr"></div>
     <div class="actions">
       <button type="button" id="deletePersonBtn" class="danger">Delete</button>
@@ -266,7 +271,7 @@
     </div>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
     <div class="hint">Data is synced to Supabase. Import adds the file's people and transactions to your existing ones.</div>
-    <div class="hint">Version 2026-10-30.2</div>
+    <div class="hint">Version 2026-11-13.1</div>
     <div class="actions">
       <button type="button" id="signOutBtn">Sign out</button>
       <button type="submit" class="primary" id="saveSettings">Done</button>
@@ -279,6 +284,7 @@
   <form class="dlg" method="dialog">
     <h3 id="reportTitle">Transaction saved</h3>
     <pre class="report" id="reportText"></pre>
+    <button type="button" id="discordBtn" class="big" hidden></button>
     <div class="actions">
       <button type="button" id="copyBtn">Copy report</button>
       <button type="submit" class="primary">Done</button>
@@ -374,8 +380,8 @@ async function insertTransactions(rows) {
   return data;
 }
 
-async function createPerson(name) {
-  const { data, error } = await db.from('people').insert({ name }).select().single();
+async function createPerson(name, discord_id = null) {
+  const { data, error } = await db.from('people').insert({ name, discord_id }).select().single();
   if (error) throw error;
   state.people.push(data);
   return data;
@@ -486,6 +492,7 @@ function openPersonDlg(p) {
   editing = p;
   $('personDlgTitle').textContent = p ? 'Edit person' : 'Add person';
   $('personName').value = p?.name || '';
+  $('personDiscord').value = p?.discord_id || '';
   $('personErr').textContent = '';
   $('deletePersonBtn').hidden = !p;
   $('personDlg').showModal();
@@ -497,16 +504,18 @@ $('personCancel').addEventListener('click', () => $('personDlg').close());
 $('personForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = $('personName').value.trim();
+  const discord_id = $('personDiscord').value.replace(/\D/g, '') || null;
   if (!name) { $('personErr').textContent = 'Enter a name'; return; }
+  if (discord_id && !/^\d{15,21}$/.test(discord_id)) { $('personErr').textContent = 'A Discord user ID is a 17–20 digit number'; return; }
   busy($('personForm'), true);
   try {
     if (editing) {
-      const { error } = await db.from('people').update({ name }).eq('id', editing.id);
+      const { error } = await db.from('people').update({ name, discord_id }).eq('id', editing.id);
       if (error) throw error;
-      editing.name = name;
+      Object.assign(editing, { name, discord_id });
       render();
     } else {
-      const p = await createPerson(name);
+      const p = await createPerson(name, discord_id);
       location.hash = `p=${p.id}`;
     }
     $('personDlg').close();
@@ -756,8 +765,25 @@ function openReport(title, text) {
   $('reportTitle').textContent = title;
   $('reportText').textContent = text;
   $('copyBtn').textContent = 'Copy report';
+  $('discordBtn').hidden = !current?.discord_id;
+  $('discordBtn').disabled = false;
+  $('discordBtn').textContent = `Send to ${current?.name} on Discord`;
   $('doneDlg').showModal();
 }
+
+// DMs the report through the discord-dm Edge Function, which holds the bot token.
+$('discordBtn').addEventListener('click', async () => {
+  const btn = $('discordBtn');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  const { error } = await db.functions.invoke('discord-dm', { body: { person_id: current.id, text: $('reportText').textContent } });
+  if (!error) { btn.textContent = 'Sent ✓'; return; }
+  let msg = error.message;
+  try { msg = (await error.context.json()).error || msg; } catch {}
+  btn.disabled = false;
+  btn.textContent = `Send to ${current.name} on Discord`;
+  alert('Discord send failed: ' + msg);
+});
 
 $('copyBtn').addEventListener('click', async () => {
   const text = $('reportText').textContent;
