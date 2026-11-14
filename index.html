@@ -271,7 +271,7 @@
     </div>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
     <div class="hint">Data is synced to Supabase. Import adds the file's people and transactions to your existing ones.</div>
-    <div class="hint">Version 2026-11-14.1</div>
+    <div class="hint">Version 2026-11-14.2</div>
     <div class="actions">
       <button type="button" id="signOutBtn">Sign out</button>
       <button type="submit" class="primary" id="saveSettings">Done</button>
@@ -610,7 +610,7 @@ function validate(t) {
     if (!(t.pct >= 0 && t.pct <= 100)) return 'Pick my % (or enter 0–100)';
   } else {
     if (!t.description) return 'Enter a description';
-    if (!(t.amount > 0)) return 'Enter an amount';
+    if (!(t.amount >= 0)) return 'Enter an amount (0 or more)';
   }
   return null;
 }
