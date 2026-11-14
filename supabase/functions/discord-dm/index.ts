@@ -1,7 +1,8 @@
-// Sends a report as a Discord DM to one of the signed-in user's people.
-// Body: { person_id, text }. The person's discord_id is read through RLS, so a
-// user can only message people they own. The bot token stays server-side in
-// the DISCORD_BOT_TOKEN secret.
+// Posts a report to the Discord channel shared with one of the signed-in user's
+// people (people.discord_channel_id), so both sides see the same message.
+// Body: { person_id, text }. The channel ID is read through RLS, so a user can only
+// post for people they own. The bot token stays server-side in the
+// DISCORD_BOT_TOKEN secret.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const cors = {
@@ -37,10 +38,10 @@ async function discord(path: string, token: string, body: unknown) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const msg = data.code === 50007
-      ? "Discord won't let the bot DM this person. They need to share a server with the bot and allow DMs from server members."
-      : data.code === 10013
-        ? 'Discord user not found. Check the Discord user ID on this person.'
+    const msg = data.code === 10003
+      ? 'Discord channel not found. Check the Discord channel ID on this person.'
+      : data.code === 50001 || data.code === 50013
+        ? "The bot can't post in that channel. Make sure it's in the server and allowed to view and send messages there."
         : res.status === 401
           ? 'The Discord bot token is invalid. Update the DISCORD_BOT_TOKEN secret in Supabase.'
           : `Discord error ${res.status}: ${data.message ?? 'unknown'}`;
@@ -67,14 +68,13 @@ Deno.serve(async (req) => {
     const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
       global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } },
     });
-    const { data: person, error } = await db.from('people').select('name, discord_id').eq('id', person_id).maybeSingle();
+    const { data: person, error } = await db.from('people').select('name, discord_channel_id').eq('id', person_id).maybeSingle();
     if (error) return json({ error: error.message }, 400);
     if (!person) return json({ error: 'Person not found' }, 404);
-    if (!person.discord_id) return json({ error: `No Discord user ID saved for ${person.name}.` }, 400);
+    if (!person.discord_channel_id) return json({ error: `No Discord channel ID saved for ${person.name}.` }, 400);
 
-    const channel = await discord('/users/@me/channels', token, { recipient_id: person.discord_id });
     for (const content of chunks(text)) {
-      await discord(`/channels/${channel.id}/messages`, token, { content, allowed_mentions: { parse: [] } });
+      await discord(`/channels/${person.discord_channel_id}/messages`, token, { content, allowed_mentions: { parse: [] } });
     }
     return json({ ok: true });
   } catch (err) {

@@ -165,9 +165,9 @@
     <label for="personName">Name</label>
     <input id="personName" autocomplete="off" required>
     <div class="hint">Reports use initials, e.g. "Ian Brown" or "ib" → ib.</div>
-    <label for="personDiscord">Discord user ID (optional)</label>
+    <label for="personDiscord">Discord channel ID (optional)</label>
     <input id="personDiscord" inputmode="numeric" autocomplete="off" placeholder="e.g. 123456789012345678">
-    <div class="hint">Lets you DM reports to them. In Discord: Settings → Advanced → Developer Mode on, then right-click (or long-press) them → Copy User ID.</div>
+    <div class="hint">Reports get posted in this channel of a server you share. In Discord: Settings → Advanced → Developer Mode on, then long-press the channel → Copy Channel ID.</div>
     <div class="err" id="personErr"></div>
     <div class="actions">
       <button type="button" id="deletePersonBtn" class="danger">Delete</button>
@@ -271,7 +271,7 @@
     </div>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
     <div class="hint">Data is synced to Supabase. Import adds the file's people and transactions to your existing ones.</div>
-    <div class="hint">Version 2026-11-13.1</div>
+    <div class="hint">Version 2026-11-14.1</div>
     <div class="actions">
       <button type="button" id="signOutBtn">Sign out</button>
       <button type="submit" class="primary" id="saveSettings">Done</button>
@@ -380,8 +380,8 @@ async function insertTransactions(rows) {
   return data;
 }
 
-async function createPerson(name, discord_id = null) {
-  const { data, error } = await db.from('people').insert({ name, discord_id }).select().single();
+async function createPerson(name, discord_channel_id = null) {
+  const { data, error } = await db.from('people').insert({ name, discord_channel_id }).select().single();
   if (error) throw error;
   state.people.push(data);
   return data;
@@ -492,7 +492,7 @@ function openPersonDlg(p) {
   editing = p;
   $('personDlgTitle').textContent = p ? 'Edit person' : 'Add person';
   $('personName').value = p?.name || '';
-  $('personDiscord').value = p?.discord_id || '';
+  $('personDiscord').value = p?.discord_channel_id || '';
   $('personErr').textContent = '';
   $('deletePersonBtn').hidden = !p;
   $('personDlg').showModal();
@@ -504,18 +504,18 @@ $('personCancel').addEventListener('click', () => $('personDlg').close());
 $('personForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = $('personName').value.trim();
-  const discord_id = $('personDiscord').value.replace(/\D/g, '') || null;
+  const discord_channel_id = $('personDiscord').value.replace(/\D/g, '') || null;
   if (!name) { $('personErr').textContent = 'Enter a name'; return; }
-  if (discord_id && !/^\d{15,21}$/.test(discord_id)) { $('personErr').textContent = 'A Discord user ID is a 17–20 digit number'; return; }
+  if (discord_channel_id && !/^\d{15,21}$/.test(discord_channel_id)) { $('personErr').textContent = 'A Discord channel ID is a 17–20 digit number'; return; }
   busy($('personForm'), true);
   try {
     if (editing) {
-      const { error } = await db.from('people').update({ name, discord_id }).eq('id', editing.id);
+      const { error } = await db.from('people').update({ name, discord_channel_id }).eq('id', editing.id);
       if (error) throw error;
-      Object.assign(editing, { name, discord_id });
+      Object.assign(editing, { name, discord_channel_id });
       render();
     } else {
-      const p = await createPerson(name, discord_id);
+      const p = await createPerson(name, discord_channel_id);
       location.hash = `p=${p.id}`;
     }
     $('personDlg').close();
@@ -765,24 +765,25 @@ function openReport(title, text) {
   $('reportTitle').textContent = title;
   $('reportText').textContent = text;
   $('copyBtn').textContent = 'Copy report';
-  $('discordBtn').hidden = !current?.discord_id;
+  $('discordBtn').hidden = !current?.discord_channel_id;
   $('discordBtn').disabled = false;
-  $('discordBtn').textContent = `Send to ${current?.name} on Discord`;
+  $('discordBtn').textContent = 'Post to Discord';
   $('doneDlg').showModal();
 }
 
-// DMs the report through the discord-dm Edge Function, which holds the bot token.
+// Posts the report to the person's shared Discord channel through the discord-dm
+// Edge Function, which holds the bot token.
 $('discordBtn').addEventListener('click', async () => {
   const btn = $('discordBtn');
   btn.disabled = true;
-  btn.textContent = 'Sending…';
+  btn.textContent = 'Posting…';
   const { error } = await db.functions.invoke('discord-dm', { body: { person_id: current.id, text: $('reportText').textContent } });
-  if (!error) { btn.textContent = 'Sent ✓'; return; }
+  if (!error) { btn.textContent = 'Posted ✓'; return; }
   let msg = error.message;
   try { msg = (await error.context.json()).error || msg; } catch {}
   btn.disabled = false;
-  btn.textContent = `Send to ${current.name} on Discord`;
-  alert('Discord send failed: ' + msg);
+  btn.textContent = 'Post to Discord';
+  alert('Discord post failed: ' + msg);
 });
 
 $('copyBtn').addEventListener('click', async () => {
