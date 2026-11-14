@@ -271,7 +271,7 @@
     </div>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
     <div class="hint">Data is synced to Supabase. Import adds the file's people and transactions to your existing ones.</div>
-    <div class="hint">Version 2026-11-14.2</div>
+    <div class="hint">Version <span id="appVersion"></span></div>
     <div class="actions">
       <button type="button" id="signOutBtn">Sign out</button>
       <button type="submit" class="primary" id="saveSettings">Done</button>
@@ -299,6 +299,7 @@
 const SUPABASE_URL = 'https://deypqofvamltxkzwnoci.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_5Kv9_RQBbqUeOJo54ayavw_dtwaLAGy';
 const LEGACY_KEY = 'balance-tracker-v1';
+const VERSION = '2026-11-14.3'; // bump on every change so open copies pick up the update
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = (id) => document.getElementById(id);
 
@@ -437,6 +438,22 @@ function route() {
   window.scrollTo(0, 0);
 }
 window.addEventListener('hashchange', route);
+
+// ----- Auto-update -----
+// GitHub Pages lets browsers (and home-screen apps) keep a stale copy of this page.
+// Check the live page for a newer VERSION and reload past the cache when there is one.
+$('appVersion').textContent = VERSION;
+async function checkForUpdate() {
+  try {
+    const res = await fetch(location.pathname + '?check=' + Date.now(), { cache: 'no-store' });
+    const live = (await res.text()).match(/const VERSION = '([^']+)'/)?.[1];
+    if (live && live !== VERSION && !document.querySelector('dialog[open]')) {
+      location.replace(location.pathname + '?v=' + encodeURIComponent(live) + location.hash);
+    }
+  } catch {}
+}
+checkForUpdate();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
 
 // ----- Rendering -----
 function render() {
