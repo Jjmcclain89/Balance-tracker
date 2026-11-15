@@ -299,7 +299,7 @@
 const SUPABASE_URL = 'https://deypqofvamltxkzwnoci.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_5Kv9_RQBbqUeOJo54ayavw_dtwaLAGy';
 const LEGACY_KEY = 'balance-tracker-v1';
-const VERSION = '2026-11-15.1'; // bump on every change so open copies pick up the update
+const VERSION = '2026-11-15.2'; // bump on every change so open copies pick up the update
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = (id) => document.getElementById(id);
 
@@ -734,11 +734,12 @@ const initials = (name) => {
   return (words[0]?.length <= 3 ? words[0] : words[0]?.[0] ?? '').toLowerCase();
 };
 // Amount plus who it goes to, instead of a sign. Positive = toward them (I owe them),
-// negative = toward me: 200 → "$200 (to ib)", -100 → "$100 (to jm)".
-const toWho = (n) => {
+// negative = toward me. Changes: 200 → "$200 (to ib)"; balances: -100 → "$100 (owed to jm)".
+const toWho = (n, label = 'to') => {
   const who = n > 0 ? initials(current.name) || 'them' : initials(state.settings.my_name) || 'me';
-  return money(Math.abs(n)) + (n ? ` (to ${who})` : '');
+  return money(Math.abs(n)) + (n ? ` (${label} ${who})` : '');
 };
+const owedTo = (n) => toWho(n, 'owed to');
 
 // Title, details and change lines for one transaction.
 function txLines(t) {
@@ -759,19 +760,19 @@ function txLines(t) {
   return lines;
 }
 
-const newBalanceLine = (end) => `New Balance: ${end ? toWho(end) : '$0 (even)'}`;
+const newBalanceLine = (end) => `New Balance: ${end ? owedTo(end) : '$0 (even)'}`;
 
 function report(t, start) {
   const end = round2(start + Number(t.delta));
   const lines = txLines(t), change = lines.pop(); // move Change below Starting Balance
-  return [...lines, `Starting Balance: ${toWho(start)}`, change, newBalanceLine(end)].join('\n');
+  return [...lines, `Starting Balance: ${owedTo(start)}`, change, newBalanceLine(end)].join('\n');
 }
 
 // Several transactions (given oldest first) in one report.
 function massReport(list, start) {
   const total = round2(list.reduce((s, t) => s + Number(t.delta), 0));
   return [
-    `Starting Balance: ${toWho(start)}`,
+    `Starting Balance: ${owedTo(start)}`,
     ...list.map((t) => '\n' + txLines(t).join('\n')),
     '',
     `Total Change: ${toWho(total)}`,
